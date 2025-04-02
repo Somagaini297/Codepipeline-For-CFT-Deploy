@@ -1,0 +1,367 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create an EC2 instance, configure it, and execute Python scripts.
+
+Metadata:
+  Version: "v2"
+  TokenRequired: true
+
+##########################
+# Parameters
+##########################
+Parameters:
+  # EC2 Specific Parameters
+  EC2KeyPairName:
+    Type: String
+    Description: Key Pair to be attached in EC2 instance, Can be taken this value from protected stalk output.
+  ec2ComputerName:
+    Type: String
+    Description: The Windows Computer Name to assign the server. This only applies if `ec2OsType` is `Windows`, otherwise any value is ignored.
+    AllowedPattern: "^[A-Z][A-Z0-9]{0,11}[0-9]$"
+    ConstraintDescription: "The computer name must be 13 characters or less, start with a capital letter, and end with a number."
+  ec2OsType:
+    Type: String
+    Description: The operating system type for the EC2 instance
+    AllowedValues:
+      - Linux
+      - Windows
+    Default: Linux
+  InstanceType:
+    Type: String
+    Default: m5.large
+    Description: EC2 instance type
+  ImageId:
+    Type: String
+    Description: AMI ID for the EC2 instance
+  InstanceProfileRoleName:
+    Type: String
+    Description: InstanceProfile for the EC2 instance
+  AvailabilityZone:
+    Type: String
+    Description: The availability zone to deploy the EC2 instance.
+    AllowedValues:
+      - "us-east-1a"
+      - "us-east-1b"
+  AliasAZ:
+    Type: String
+    Description: The Alias of availability zone need to name the application instance.
+    AllowedValues:
+      - "1a"
+      - "1b"
+  # Application Parameters
+  Department:
+    Type: String
+    Description: Name of Department
+    Default: hq
+  AppName:
+    Type: String
+    Description: Name of Application
+  UAI: 
+    Type: String
+    Description: Unique Access Identifier
+  AppCID:
+    Type: String
+    Description: Configuration Identifier
+  Env:
+    Description: "Environment Label. Must be one of these prod, qa, dev, or stage. Everything also need to be lowercase."
+    Type: String
+    AllowedValues:
+      - prod
+      - qa 
+      - dev
+      - stage
+    ConstraintDescription: "Must be dev, qa, stage, or prod."
+    Default: dev
+  Workstream:
+    Type: String
+    Description: "Business related to which project"
+    AllowedValues:
+      - hr
+      - comm
+      - legal
+      - phyinfra
+      - finance
+      - all
+
+  # Network Inteface Parameters
+  AppSecurityGroupId:
+    Type: String
+    Description: SecurityGroupId to be used in EC2Instance, can be taken this value from output of protected stalk.
+  eniAttachExistingNetworkInterface:
+    Type: String
+    Description: |
+      Boolean to indicate if an existing network interface should be attached. 
+      If 'true', the network interface ID must be specified in 'eniNetworkInterfaceId'.  
+      If 'false', 'SubnetId' and 'SecurityGroupId' must be specified.
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+  eniNetworkInterfaceId:
+    Type: String
+    Description: The ID of an existing network interface (ENI) to attach to the EC2 instance.  This is only used if 'eniAttachExistingNetworkInterface' is 'true'.
+    Default: ""
+  SubnetId:
+    Type: String
+    Description: Subnet ID for the EC2 instance
+  VpcId:
+    Type: String
+    Description: VPC ID for the security group
+   # OS Volume Parameters
+  ebsOsVolumeType:
+    Type: String
+    Description: The type of the Operating System EBS volume
+    Default: gp3
+    AllowedValues:
+      - gp2
+      - gp3
+      - io1
+      - io2
+      - sc1
+      - st1
+  ebsOsVolumeSize:
+    Type: Number
+    Description: The size of the Operating System EBS volume in GB
+    Default: 30
+  ebsOsIops:
+    Type: Number
+    Description: The IOPS of the Operating System EBS volume
+    Default: 3000
+  ebsOsKmsKeyId:
+    Type: String
+    Description: |
+      The KMS Key ID to encrypt the OS data. 
+    Default: ""
+    # App Data Volume Parameters
+  ebsAttachExistingAppDataVolume:
+    Type: String
+    Description: Boolean to indicate if an Application Data volume should be attached.  If 'true', the volume ID must be specified in 'ebsAppDataVolumeId' parameter.
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+  ebsAppDataVolumeId:
+    Type: String
+    Description: The ID of the existing EBS volume for AppData.  This parameter is only valid if 'ebsAttachExistingAppDataVolume' is 'true'.
+    Default: ""
+    AllowedPattern: "^(vol-[0-9a-fA-F]{8,})?$|^$"
+    ConstraintDescription: "Must be a valid EBS volume ID or empty."
+  ebsAppDataVolumeType:
+    Type: String
+    Description: The type of the App Data EBS volume.  This parameter is only valid if 'ebsAttachExistingAppDataVolume' is 'false'
+    Default: gp3
+    AllowedValues:
+      - gp2
+      - gp3
+      - io1
+      - io2
+      - sc1
+      - st1
+  ebsAppDataVolumeSize:
+    Type: Number
+    Description: The size of the App Data EBS volume in GB.  This parameter is only valid if 'ebsAttachExistingAppDataVolume' is 'false'
+    Default: 50
+  ebsAppDataThroughput:
+    Type: Number
+    Description: The throughput of the App Data EBS volume in MiB/s.  This parameter is only valid if 'ebsAttachExistingAppDataVolume' is 'false'
+    Default: 125
+  ebsAppDataIops:
+    Type: Number
+    Description: The IOPS of the App Data EBS volume.  This parameter is only valid if 'ebsAttachExistingAppDataVolume' is 'false'
+    Default: 3000
+  ebsAppDataKmsKeyId:
+    Type: String
+    Description: |
+      The KMS Key ID to encrypt App Data Volume. 
+    Default: ""
+
+##########################
+# Conditions
+##########################
+Conditions:
+  # ENI Conditions
+  AttachExistingNetworkInterface: !Equals [!Ref eniAttachExistingNetworkInterface, "true"]
+  CreateNewNetworkInterface: !Not [!Condition AttachExistingNetworkInterface]
+  # App Data Volume Conditions
+  AttachExistingAppDataVolume: !Equals [!Ref ebsAttachExistingAppDataVolume, "true"]
+  CreateNewAppDataVolume: !Not [!Condition AttachExistingAppDataVolume]
+
+  # KMS Key Conditions
+  UseDefaultKmsKeyForOsVolume: !Equals [!Ref ebsOsKmsKeyId, ""]
+  UseDefaultKmsKeyForAppDataVolume: !Equals [!Ref ebsAppDataKmsKeyId, ""]
+
+  # OS Type Conditions
+  IsLinux: !Equals [!Ref ec2OsType, "Linux"]
+  IsWindows: !Equals [!Ref ec2OsType, "Windows"]
+
+  # Environment Conditions
+  IsProd: !Equals [!Ref Env, "prod"]
+  IsNotProd: !Not [!Condition IsProd]
+
+
+##########################
+# Resources
+##########################
+
+Resources:
+  NetworkInterface:
+    Type: AWS::EC2::NetworkInterface
+    Condition: CreateNewNetworkInterface
+    Properties:
+      SubnetId: !Ref SubnetId
+      GroupSet: 
+        - !Ref AppSecurityGroupId
+      Tags:
+        - Key: Name
+          Value: !Sub "${Department}-${Workstream}-${UAI}-${AppName}-${Env}-ec2-${AliasAZ}"
+        - Key: Workstream
+          Value: !Ref Workstream
+        - Key: AppCID
+          Value: !Ref AppCID
+        - Key: Env
+          Value: !Ref Env
+        - Key: UAI
+          Value: !Ref UAI
+        - Key: 'StackName'
+          Value: !Ref 'AWS::StackName'
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref EC2KeyPairName
+      ImageId: !Ref ImageId
+      # SubnetId: !Ref SubnetId
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          NetworkInterfaceId: !If [AttachExistingNetworkInterface, !Ref eniNetworkInterfaceId, !Ref NetworkInterface]
+      # SecurityGroupIds:
+      #   - !Ref SecurityGroupId
+      IamInstanceProfile: !Ref InstanceProfileRoleName
+      BlockDeviceMappings:
+        - DeviceName: !If [IsLinux, /dev/sda1, /dev/sda1]
+          Ebs:
+            VolumeSize: !Ref ebsOsVolumeSize
+            VolumeType: !Ref ebsOsVolumeType
+            Iops: !Ref ebsOsIops
+            Encrypted: true
+            KmsKeyId: !If [UseDefaultKmsKeyForOsVolume, !Sub "alias/aws/ebs", !Ref ebsOsKmsKeyId ]
+      PropagateTagsToVolumeOnCreation: true
+      # MetadataOptions:
+      #   HttpTokens: "required" #Enforces IMDSv2 (token required)
+      #   HttpPutResponseHopLimit: 2
+      #   HttpEndpoint: "enabled"
+      Tags:
+        - Key: Name
+          Value: !Sub "${Department}-${Workstream}-${UAI}-${AppName}-${Env}-ec2-${AliasAZ}"
+        - Key: Workstream
+          Value: !Ref Workstream
+        - Key: AppCID
+          Value: !Ref AppCID
+        - Key: Env
+          Value: !Ref Env
+        - Key: UAI
+          Value: !Ref UAI
+        - Key: 'StackName'
+          Value: !Ref 'AWS::StackName'
+        - Key: Backup
+          Value: !If 
+            - IsProd 
+            - "ams:rt:backup-prod, ams:rt:backup"
+            - "ams:rt:backup"
+      UserData:
+        Fn::Base64: !If
+          - IsLinux
+
+          # If Linux run bash setup
+          - !Sub |
+              #!/bin/bash
+              # Install necessary packages
+              yum update -y
+              yum install -y aws-cli
+              # Check if the app volume is already formatted
+              if ! file -s /dev/xvdb | grep -q 'filesystem'; then
+                # Format the volume
+                mkfs -t ext4 /dev/xvdb
+              fi
+              # Create a mount point and mount the volume
+              mkdir -p /u01
+              mount /dev/xvdb /u01
+              # Add the volume to /etc/fstab to mount it on reboot
+              echo '/dev/xvdb /u01 ext4 defaults,nofail 0 2' >> /etc/fstab
+ 
+          # Else Windows, so run PowerShell setup
+          - !Sub |
+              <powershell>
+              ################################
+              # Install necessary packages
+              ################################
+              Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+              Install-Module -Name AWSPowerShell -Force -AllowClobber
+              ################################
+              # Check if the volume is already formatted
+              ################################
+              if ((Get-Partition -DiskNumber 1 -ErrorAction SilentlyContinue) -eq $null) {
+                # Initialize and format the volume
+                Initialize-Disk -Number 1 -PartitionStyle MBR
+                New-Partition -DiskNumber 1 -UseMaximumSize -AssignDriveLetter | Format-Volume -FileSystem NTFS -NewFileSystemLabel "AppData"
+              }
+              ################################
+              # Assign the D: drive letter to the AppData volume
+              ################################
+              $partition = Get-Partition -DiskNumber 1
+              Remove-PartitionAccessPath -DiskNumber 1 -PartitionNumber $partition.PartitionNumber -AccessPath $partition.DriveLetter + ":"
+              Add-PartitionAccessPath -DiskNumber 1 -PartitionNumber $partition.PartitionNumber -AccessPath "D:"
+              ################################
+              # Call cfn-init to handle further configuration
+              ################################
+              cfn-init.exe -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region} --configsets default
+              </powershell>
+
+  AppDataVolume:
+    Type: AWS::EC2::Volume
+    Condition: CreateNewAppDataVolume
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Delete
+    Properties:
+      Size: !Ref ebsAppDataVolumeSize
+      VolumeType: !Ref ebsAppDataVolumeType
+      Throughput: !Ref ebsAppDataThroughput
+      Iops: !Ref ebsAppDataIops
+      Encrypted: true
+      KmsKeyId: !If [UseDefaultKmsKeyForAppDataVolume, !Sub "alias/aws/ebs", !Ref ebsAppDataKmsKeyId ]
+      AvailabilityZone: !Ref AvailabilityZone
+      Tags:
+        - Key: Name
+          Value: !Sub "${Department}-${Workstream}-${UAI}-${AppName}-${Env}-ec2-${AliasAZ}"
+        - Key: Workstream
+          Value: !Ref Workstream
+        - Key: AppCID
+          Value: !Ref AppCID
+        - Key: Env
+          Value: !Ref Env
+        - Key: UAI
+          Value: !Ref UAI
+        - Key: 'StackName'
+          Value: !Ref 'AWS::StackName'
+        - Key: Backup
+          Value: !If 
+            - IsProd 
+            - "ams:rt:backup-prod, ams:rt:backup"
+            - "ams:rt:backup"
+
+  # Attach the App Data volume to EC2 instance, attaching either an existing specified volume or a newly created volume.
+  AppDataVolumeAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      InstanceId: !Ref EC2Instance
+      VolumeId: !If [AttachExistingAppDataVolume, !Ref ebsAppDataVolumeId, !Ref AppDataVolume]
+      Device: !If [IsLinux, /dev/xvdb, /dev/sdb]
+
+
+##########################
+# Outputs
+##########################
+
+Outputs:
+  InstanceId:
+    Description: Instance ID
+    Value: !Ref EC2Instance
