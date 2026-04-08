@@ -6,7 +6,7 @@ on:
      - main
 
 env:
-  STACK-NAME: ec-deploy     
+  STACK_NAME: ec-deploy     
 
 jobs:
   Deploy-EC2-On-AWS:
@@ -20,7 +20,7 @@ jobs:
         run: |
           aws cloudformation deploy \
           --template-file EC2cft.yaml \
-          --stack-name $STACK-NAME \
+          --stack-name $STACK_NAME \
           --capabilities CAPABILITY_NAMED_IAM \
           --parameter-overrides file://EC2cft.json
 
