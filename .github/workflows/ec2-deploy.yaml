@@ -1,0 +1,27 @@
+name: Deploy EC2 Instance on AWS
+
+on:
+  push:
+    branches: 
+     - main
+
+env:
+  STACK-NAME: ec-deploy     
+
+jobs:
+  Deploy-EC2-On-AWS:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v3
+
+      - name: Deploy Cloud Formation
+        run: |
+          aws cloudformation deploy \
+          --template-file EC2cft.yaml \
+          --stack-name $STACK-NAME \
+          --capabilities CAPABILITY_NAMED_IAM \
+          --parameter-overrides file://EC2cft.json
+
+
