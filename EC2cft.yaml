@@ -180,10 +180,10 @@ Parameters:
 Conditions:
   # ENI Conditions
   AttachExistingNetworkInterface: !Equals [!Ref eniAttachExistingNetworkInterface, "true"]
-  CreateNewNetworkInterface: !Not [ AttachExistingNetworkInterface]
+  CreateNewNetworkInterface: !Not [!Condition AttachExistingNetworkInterface]
   # App Data Volume Conditions
   AttachExistingAppDataVolume: !Equals [!Ref ebsAttachExistingAppDataVolume, "true"]
-  CreateNewAppDataVolume: !Not [ AttachExistingAppDataVolume]
+  CreateNewAppDataVolume: !Not [!Condition AttachExistingAppDataVolume]
 
   # KMS Key Conditions
   UseDefaultKmsKeyForOsVolume: !Equals [!Ref ebsOsKmsKeyId, ""]
@@ -195,7 +195,7 @@ Conditions:
 
   # Environment Conditions
   IsProd: !Equals [!Ref Env, "prod"]
-  IsNotProd: !Not [IsProd]
+  IsNotProd: !Not [!Condition IsProd]
 
 
 ##########################
